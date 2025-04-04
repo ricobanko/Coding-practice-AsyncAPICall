@@ -3,6 +3,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.Extensions.Http;
 using Refit;
 
 namespace APITests;
@@ -27,14 +29,51 @@ public class AppServices
 
         _hostApplicationBuilder.Services.AddRefitClient<ITodoService>().ConfigureHttpClient((serviceProvider, client) =>
         {
-            var httpClientSettings = serviceProvider.GetRequiredService<IOptions<HttpClientSettings>>().Value;
-            client.BaseAddress = new Uri(httpClientSettings.BaseUrl);
-            client.DefaultRequestHeaders.UserAgent.ParseAdd(httpClientSettings.UserAgent);
+                var httpClientSettings = serviceProvider.GetRequiredService<IOptions<HttpClientSettings>>().Value;
+                client.BaseAddress = new Uri(httpClientSettings.BaseUrl);
+                client.DefaultRequestHeaders.UserAgent.ParseAdd(httpClientSettings.UserAgent);
         });
 
         _hostApplicationBuilder.Services.AddScoped<ToDoTestService>();
 
         return this;
+    }
+
+    public AppServices? AddPollyResilience()
+    {
+        _ = _hostApplicationBuilder.Services.AddSingleton(CreateWaitAndRetryPolicy(
+        [
+            TimeSpan.FromSeconds(1),
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(15)
+        ]));
+
+        return this;
+    }
+
+    private static Polly.Retry.AsyncRetryPolicy CreateWaitAndRetryPolicy(IEnumerable<TimeSpan> sleepsBeetweenRetries)
+    {
+        return Policy
+            .Handle<Exception>()
+            .WaitAndRetryAsync(
+                sleepDurations: sleepsBeetweenRetries,
+                onRetry: (ex, span, retry, _) =>
+                {
+                    Console.WriteLine(ex);
+
+                    var backgroundColour = Console.BackgroundColor;
+                    var foregroundColour = Console.ForegroundColor;
+
+                    Console.BackgroundColor = ConsoleColor.Red;
+                    Console.ForegroundColor = ConsoleColor.Black;
+
+                    Console.Out.WriteLineAsync($"Error recorded at {DateTime.Now:HH:mm:ss}, will retry. {retry}");
+
+                    Console.BackgroundColor = backgroundColour;
+                    Console.ForegroundColor = foregroundColour;
+                }
+            );
     }
 
     public AppServices? AddConfig()

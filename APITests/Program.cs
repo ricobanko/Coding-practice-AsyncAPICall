@@ -3,27 +3,29 @@ using APITests.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Polly.Retry;
 
 HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddJsonFile("./appsettings.json", optional: false, reloadOnChange: true);
+builder.Services.Configure<HttpClientSettings>(builder.Configuration.GetSection("HttpClientSettings"));
 
-try
-{
-    AppServices? appServices = new AppServices(builder)
+var serviceProvider = builder.Services.BuildServiceProvider();
+var httpClientSettings = serviceProvider.GetRequiredService<IOptions<HttpClientSettings>>().Value;
+
+AppServices? appServices = new AppServices(builder)
     ?.AddConfig()!
-    ?.AddServices()!;
+    ?.AddServices()!
+    ?.AddPollyResilience();
 
-    using IHost host = appServices.BuildHost();
+using IHost host = builder.Build();
 
-    var toDoTestService = host.Services.GetRequiredService<ToDoTestService>();
-    var todos = await toDoTestService.GetUserTodoAsync(10);
+AsyncRetryPolicy asyncRetryPolicy = host.Services.GetRequiredService<AsyncRetryPolicy>();
+ITodoService todoService = host.Services.GetRequiredService<ITodoService>();
 
-    foreach (var todo in todos)
-    {
-        Console.WriteLine($"Todo: {todo.Title}");
-    }
-} catch (ArgumentNullException ex)
+var todos = await asyncRetryPolicy.ExecuteAsync(() => todoService.GetUserTodoAsync(2));
+
+foreach (var todo in todos)
 {
-    Console.WriteLine($"Error: {ex.Message}");
-    throw;
+    Console.WriteLine($"Todo: {todo.Title}");
 }
