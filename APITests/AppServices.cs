@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Polly;
-using Polly.Extensions.Http;
+using Polly.Retry;
 using Refit;
 
 namespace APITests;
@@ -14,7 +14,7 @@ public class AppServices
 
     public AppServices(HostApplicationBuilder hostApplicationBuilder)
     {
-        this._hostApplicationBuilder = hostApplicationBuilder;
+        _hostApplicationBuilder = hostApplicationBuilder;
     }
 
     public AppServices? AddServices() 
@@ -41,20 +41,13 @@ public class AppServices
 
     public AppServices? AddPollyResilience()
     {
-        _ = _hostApplicationBuilder.Services.AddSingleton(CreateWaitAndRetryPolicy(
-        [
+        var sleepsBeetweenRetries = new List<TimeSpan>{ 
             TimeSpan.FromSeconds(1),
             TimeSpan.FromSeconds(5),
             TimeSpan.FromSeconds(10),
-            TimeSpan.FromSeconds(15)
-        ]));
+            TimeSpan.FromSeconds(15)};
 
-        return this;
-    }
-
-    private static Polly.Retry.AsyncRetryPolicy CreateWaitAndRetryPolicy(IEnumerable<TimeSpan> sleepsBeetweenRetries)
-    {
-        return Policy
+        var retryPolicy = Policy
             .Handle<Exception>()
             .WaitAndRetryAsync(
                 sleepDurations: sleepsBeetweenRetries,
@@ -74,6 +67,10 @@ public class AppServices
                     Console.ForegroundColor = foregroundColour;
                 }
             );
+
+        _ = _hostApplicationBuilder.Services.AddSingleton<AsyncRetryPolicy>(retryPolicy);
+
+        return this;
     }
 
     public AppServices? AddConfig()
